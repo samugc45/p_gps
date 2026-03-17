@@ -1,13 +1,12 @@
 """
 Módulo de parseo de tramas NMEA GGA.
 
-Analiza tramas del estándar NMEA 0183 con sentencia GGA
-y extrae los campos relevantes: posición, calidad del fix,
-número de satélites, HDOP, altitud, etc.
+Analiza tramas del estándar NMEA 0183 con sentencia GGA y extrae:
+hora UTC, latitud, longitud, calidad del fix, satélites, HDOP, altitud, etc.
 """
 
 
-# Diccionario de calidades de fix GPS
+# Descripción textual de cada calidad de fix GPS
 CALIDAD_FIX = {
     0: "Inválido (sin fix)",
     1: "GPS fix (SPS)",
@@ -24,29 +23,26 @@ CALIDAD_FIX = {
 def verificar_checksum(trama):
     """
     Verifica el checksum de una trama NMEA.
-
     El checksum es un XOR de todos los caracteres entre '$' y '*'.
 
     Parámetros:
-        trama (str): Trama NMEA completa.
+        trama (str): Trama NMEA completa (ej: "$GPGGA,...*47").
 
     Retorna:
-        bool: True si el checksum es válido, False en caso contrario.
+        bool: True si el checksum es correcto.
     """
     try:
-        # Extraer la parte entre '$' y '*'
         if '$' not in trama or '*' not in trama:
             return False
 
         contenido = trama.split('$')[1].split('*')[0]
         checksum_recibido = trama.split('*')[1].strip()
 
-        # Calcular XOR de todos los caracteres
+        # XOR de todos los caracteres entre $ y *
         checksum_calculado = 0
         for char in contenido:
             checksum_calculado ^= ord(char)
 
-        # Comparar (el checksum se expresa en hexadecimal, 2 dígitos)
         return f"{checksum_calculado:02X}" == checksum_recibido.upper()
 
     except (IndexError, ValueError):
@@ -55,152 +51,108 @@ def verificar_checksum(trama):
 
 def parsear_coordenada_latitud(valor_str, direccion):
     """
-    Convierte la latitud NMEA (DDMM.MMMM) a grados decimales.
+    Convierte latitud NMEA (DDMM.MMMM, N/S) a grados decimales.
 
-    Formato NMEA: DDMM.MMMM donde DD = grados, MM.MMMM = minutos.
-
-    Parámetros:
-        valor_str (str): Valor de latitud en formato NMEA.
-        direccion (str): 'N' (Norte) o 'S' (Sur).
+    Formato NMEA: DDMM.MMMM → DD grados + MM.MMMM minutos.
 
     Retorna:
-        tuple: (grados, minutos, decimal, dirección)
+        tuple: (grados_enteros, minutos_decimal, grados_decimales, dirección) o None.
     """
     if not valor_str or not direccion:
         return None
-
     try:
         valor = float(valor_str)
         grados = int(valor / 100)
         minutos = valor - (grados * 100)
         decimal = grados + (minutos / 60.0)
-
-        # Si es Sur, el valor es negativo
         if direccion == 'S':
             decimal = -decimal
-
         return (grados, minutos, decimal, direccion)
-
     except ValueError:
         return None
 
 
 def parsear_coordenada_longitud(valor_str, direccion):
     """
-    Convierte la longitud NMEA (DDDMM.MMMM) a grados decimales.
+    Convierte longitud NMEA (DDDMM.MMMM, E/W) a grados decimales.
 
-    Formato NMEA: DDDMM.MMMM donde DDD = grados, MM.MMMM = minutos.
-
-    Parámetros:
-        valor_str (str): Valor de longitud en formato NMEA.
-        direccion (str): 'E' (Este) o 'W' (Oeste).
+    Formato NMEA: DDDMM.MMMM → DDD grados + MM.MMMM minutos.
 
     Retorna:
-        tuple: (grados, minutos, decimal, dirección)
+        tuple: (grados_enteros, minutos_decimal, grados_decimales, dirección) o None.
     """
     if not valor_str or not direccion:
         return None
-
     try:
         valor = float(valor_str)
         grados = int(valor / 100)
         minutos = valor - (grados * 100)
         decimal = grados + (minutos / 60.0)
-
-        # Si es Oeste, el valor es negativo
         if direccion == 'W':
             decimal = -decimal
-
         return (grados, minutos, decimal, direccion)
-
     except ValueError:
         return None
 
 
 def formatear_hora(hora_str):
     """
-    Convierte la hora NMEA (HHMMSS o HHMMSS.SS) a formato legible HH:MM:SS.
-
-    Parámetros:
-        hora_str (str): Hora en formato NMEA.
-
-    Retorna:
-        str: Hora formateada.
+    Convierte hora NMEA (HHMMSS o HHMMSS.SS) a formato legible HH:MM:SS UTC.
     """
     if not hora_str or len(hora_str) < 6:
         return "N/A"
-
-    hh = hora_str[0:2]
-    mm = hora_str[2:4]
-    ss = hora_str[4:]
-    return f"{hh}:{mm}:{ss} UTC"
+    return f"{hora_str[0:2]}:{hora_str[2:4]}:{hora_str[4:]} UTC"
 
 
 def parsear_gga(trama):
     """
-    Parsea una trama NMEA GGA completa y extrae todos los campos.
+    Parsea una trama NMEA GGA completa y devuelve un diccionario con todos los campos.
 
-    Formato esperado:
-    $GPGGA,HHMMSS.SS,DDMM.MMMM,N/S,DDDMM.MMMM,E/W,Q,NN,HDOP,ALT,M,GEOID,M,DGPS_AGE,DGPS_ID*CS
+    Formato:
+      $GPGGA,HHMMSS.SS,DDMM.MMMM,N/S,DDDMM.MMMM,E/W,Q,NN,HDOP,ALT,M,GEOID,M,AGE,ID*CS
 
     Parámetros:
         trama (str): Trama NMEA GGA completa.
 
     Retorna:
-        dict: Diccionario con todos los campos parseados, o None si la trama es inválida.
+        dict con todos los campos, o None si la trama es inválida.
     """
-    if not trama:
+    if not trama or 'GGA' not in trama:
         return None
 
-    # Verificar que es una trama GGA
-    if 'GGA' not in trama:
-        return None
-
-    # Verificar checksum (opcional pero recomendado)
+    # Verificar checksum si está presente
     if '*' in trama:
         if not verificar_checksum(trama):
-            print(f"[AVISO] Checksum inválido en trama: {trama}")
-            # Continuamos igualmente, pero avisamos
+            print(f"  [AVISO] Checksum inválido: {trama}")
 
     try:
-        # Eliminar checksum para el parseo de campos
+        # Quitar checksum para separar campos
         trama_limpia = trama.split('*')[0] if '*' in trama else trama
         campos = trama_limpia.split(',')
 
-        # Necesitamos al menos 15 campos para una trama GGA válida
         if len(campos) < 15:
             return None
 
-        # Campo 1: Hora UTC
+        # Hora UTC
         hora_utc = formatear_hora(campos[1])
 
-        # Campos 2-3: Latitud
+        # Latitud (campos 2-3)
         lat = parsear_coordenada_latitud(campos[2], campos[3])
         if lat is None:
             return None
-
         lat_grados, lat_minutos, lat_decimal, lat_dir = lat
 
-        # Campos 4-5: Longitud
+        # Longitud (campos 4-5)
         lon = parsear_coordenada_longitud(campos[4], campos[5])
         if lon is None:
             return None
-
         lon_grados, lon_minutos, lon_decimal, lon_dir = lon
 
-        # Campo 6: Calidad del fix
+        # Resto de campos
         calidad_fix = int(campos[6]) if campos[6] else 0
-
-        # Campo 7: Número de satélites
         num_satelites = int(campos[7]) if campos[7] else 0
-
-        # Campo 8: HDOP
         hdop = float(campos[8]) if campos[8] else 0.0
-
-        # Campos 9-10: Altitud sobre el nivel del mar
         altitud = float(campos[9]) if campos[9] else 0.0
-
-        # Campos 11-12: Altura del geoide sobre el elipsoide WGS84
         altura_geoide = float(campos[11]) if campos[11] else 0.0
 
         return {
@@ -223,5 +175,5 @@ def parsear_gga(trama):
         }
 
     except (ValueError, IndexError) as e:
-        print(f"[ERROR] Error parseando trama GGA: {e}")
+        print(f"  [ERROR] Parseando trama GGA: {e}")
         return None
