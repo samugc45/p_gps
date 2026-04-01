@@ -19,7 +19,6 @@ def verificar_checksum(trama):
         contenido = trama.split('$')[1].split('*')[0]
         checksum_recibido = trama.split('*')[1].strip()
 
-        # XOR de todos los caracteres entre $ y *
         checksum_calculado = 0
         for char in contenido:
             checksum_calculado ^= ord(char)
