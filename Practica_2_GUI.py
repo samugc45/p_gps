@@ -15,7 +15,7 @@ MAPAS = {
         "E_MAX": 447008.00, "N_MIN": 4470787.00
     },
     "INSIA": {
-        "archivo": "insia.PNG", # Asegúrate de crear esta imagen
+        "archivo": "insia.PNG", 
         "E_MIN": 446237.00, "N_MAX": 4470980.00,
         "E_MAX": 446444.00, "N_MIN": 4470777.00
     }
@@ -27,15 +27,14 @@ class NavegadorGPS:
         self.root.title("Navegador GPS - Práctica 2")
         
         self.leyendo = False
-        self.historial_puntos = [] # Para dibujar la ruta (estela)
+        self.historial_puntos = [] # lista vacia donde se guardarán las coordenadas en píxeles para trazar la ruta
         
-        # --- PANEL DE CONTROL SUPERIOR ---
         frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
         tk.Label(frame_controles, text="Puerto Serie:").pack(side=tk.LEFT)
         self.entry_puerto = tk.Entry(frame_controles, width=15)
-        self.entry_puerto.insert(0, "COM1") # Valor por defecto
+        self.entry_puerto.insert(0, "COM1") 
         self.entry_puerto.pack(side=tk.LEFT, padx=5)
         
         self.btn_conectar = tk.Button(frame_controles, text="Conectar", command=self.iniciar_conexion, bg="lightblue")
@@ -47,27 +46,21 @@ class NavegadorGPS:
         combo_mapas.pack(side=tk.LEFT, padx=5)
         combo_mapas.bind("<<ComboboxSelected>>", self.cambiar_mapa)
         
-        # --- ÁREA DEL MAPA (CANVAS) ---
         self.canvas = tk.Canvas(root, bg="gray")
         self.canvas.pack()
         
-        # Imagen y variables de estado del mapa
         self.imagen_tk = None
         self.mapa_actual = None
         
-        # Variables del coche
         self.radio_coche = 6
         self.coche = self.canvas.create_oval(-20, -20, -20, -20, fill="red", outline="black", width=2)
         
-        # --- BARRA DE ESTADO INFERIOR ---
         self.label_info = tk.Label(root, text="Esperando conexión...", bg="white", font=("Arial", 10), pady=5)
         self.label_info.pack(fill=tk.X, side=tk.BOTTOM)
         
-        # Cargar el mapa inicial
         self.cambiar_mapa()
 
     def cambiar_mapa(self, event=None):
-        """Carga la imagen del mapa seleccionado y reconfigura el Canvas."""
         nombre_mapa = self.mapa_seleccionado.get()
         self.mapa_actual = MAPAS[nombre_mapa]
         
@@ -77,16 +70,14 @@ class NavegadorGPS:
             self.imagen_tk = ImageTk.PhotoImage(imagen_pil)
             
             self.canvas.config(width=self.ancho_img, height=self.alto_img)
-            self.canvas.delete("fondo") # Borrar imagen anterior
+            self.canvas.delete("fondo") 
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.imagen_tk, tags="fondo")
             
-            # Asegurar que el coche y la ruta queden por encima de la imagen
             self.canvas.tag_lower("fondo")
             
-            # Borramos la ruta trazada al cambiar de mapa
             self.canvas.delete("ruta")
             self.historial_puntos.clear()
-            self.canvas.coords(self.coche, -20, -20, -20, -20) # Esconder coche temporalmente
+            self.canvas.coords(self.coche, -20, -20, -20, -20) 
             
             self.label_info.config(text=f"Mapa cambiado a {nombre_mapa}. Esperando GPS...")
             
@@ -94,7 +85,6 @@ class NavegadorGPS:
             messagebox.showerror("Error", f"No se encuentra la imagen '{self.mapa_actual['archivo']}'.")
 
     def utm_a_pixeles(self, easting, northing):
-        """Convierte coordenadas UTM a píxeles X, Y en el Canvas actual."""
         E_MIN = self.mapa_actual["E_MIN"]
         E_MAX = self.mapa_actual["E_MAX"]
         N_MIN = self.mapa_actual["N_MIN"]
@@ -106,30 +96,26 @@ class NavegadorGPS:
         return int(x), int(y)
 
     def actualizar_interfaz(self, easting, northing, num_sats):
-        """Mueve el coche, dibuja la ruta y actualiza el texto."""
         x, y = self.utm_a_pixeles(easting, northing)
         
-        # Dibujar la línea de la ruta (estela) si ya tenemos puntos anteriores
         if self.historial_puntos:
             ult_x, ult_y = self.historial_puntos[-1]
             self.canvas.create_line(ult_x, ult_y, x, y, fill="blue", width=3, tags="ruta")
             
         self.historial_puntos.append((x, y))
         
-        # Mover el coche y ponerlo encima de todo
         self.canvas.coords(self.coche, 
                            x - self.radio_coche, y - self.radio_coche, 
                            x + self.radio_coche, y + self.radio_coche)
         self.canvas.tag_raise(self.coche)
         
-        # Actualizar texto
+        
         texto = f"Easting: {easting:.2f} | Northing: {northing:.2f} | Satélites: {num_sats}"
         self.label_info.config(text=texto)
 
     def iniciar_conexion(self):
-        """Inicia el hilo del GPS cuando se pulsa el botón."""
         if self.leyendo:
-            return # Ya está conectado
+            return 
             
         puerto = self.entry_puerto.get().strip()
         if not puerto:
@@ -144,7 +130,6 @@ class NavegadorGPS:
         self.hilo_gps.start()
 
     def leer_gps_continuamente(self, puerto):
-        """Lee el puerto serie en segundo plano."""
         try:
             ser = serial.Serial(port=puerto, baudrate=4800, timeout=1)
             self.root.after(0, lambda: self.label_info.config(text="GPS Conectado. Esperando datos..."))
@@ -165,7 +150,6 @@ class NavegadorGPS:
             print(f"[ERROR] Inesperado: {e}")
 
     def desconectar(self):
-        """Restaura el estado del botón si hay un error."""
         self.leyendo = False
         self.btn_conectar.config(text="Conectar", state=tk.NORMAL)
         self.label_info.config(text="Desconectado.")
