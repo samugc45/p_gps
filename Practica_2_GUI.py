@@ -3,11 +3,72 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import serial
 import threading
+import math
+import os
 
 from parseo_tramas import parsear_gga
 from conversion_utm import geograficas_a_utm
 
-# --- CONFIGURACIÓN DE LOS MAPAS ---
+# =====================================================================
+# CLASE PARA LA PRÁCTICA 3: MAPA INSIA Y AVISO AL CONDUCTOR
+# =====================================================================
+class MapaINSIA:
+    def __init__(self, ruta_archivo):
+        self.puntos = []
+        self.cargar_mapa(ruta_archivo)
+
+    def cargar_mapa(self, ruta_archivo):
+        """Carga el mapa txt con formato: UTM_Norte UTM_Este Velocidad_Maxima"""
+        if not os.path.exists(ruta_archivo):
+            print(f"[AVISO] No se encontró el archivo '{ruta_archivo}'. Crea este archivo para que funcione el aviso.")
+            return
+            
+        try:
+            with open(ruta_archivo, 'r') as f:
+                for linea in f:
+                    if linea.strip():
+                        partes = linea.replace(',', ' ').split()
+                        if len(partes) >= 3:
+                            norte = float(partes[0])
+                            este = float(partes[1])
+                            v_max = float(partes[2])
+                            self.puntos.append({'N': norte, 'E': este, 'Vmax': v_max})
+            print(f"[INFO] Mapa INSIA cargado correctamente con {len(self.puntos)} puntos.")
+        except Exception as e:
+            print(f"[ERROR] No se pudo cargar el mapa: {e}")
+
+    def obtener_limite_velocidad(self, utm_n, utm_e):
+        """Busca el punto más cercano y devuelve su límite de velocidad."""
+        if not self.puntos:
+            return 0
+
+        distancia_minima = float('inf')
+        limite_actual = 0
+
+        for p in self.puntos:
+            dist = math.sqrt((utm_n - p['N'])**2 + (utm_e - p['E'])**2)
+            if dist < distancia_minima:
+                distancia_minima = dist
+                limite_actual = p['Vmax']
+
+        return limite_actual
+
+    def evaluar_aviso(self, velocidad_actual, velocidad_maxima):
+        """Devuelve verde, amarillo o rojo según la velocidad actual y el límite."""
+        if velocidad_maxima == 0:
+            return "gray"
+
+        margen = velocidad_maxima * 0.10
+        if velocidad_actual < (velocidad_maxima - margen):
+            return "green"
+        elif velocidad_actual > (velocidad_maxima + margen):
+            return "red"
+        else:
+            return "yellow"
+
+# =====================================================================
+# CONFIGURACIÓN DE LOS MAPAS EN PANTALLA
+# =====================================================================
 MAPAS = {
     "Campus Sur": {
         "archivo": "etsisi.PNG",
@@ -21,14 +82,33 @@ MAPAS = {
     }
 }
 
+# =====================================================================
+# INTERFAZ GRÁFICA PRINCIPAL
+# =====================================================================
 class NavegadorGPS:
     def __init__(self, root):
         self.root = root
-        self.root.title("Navegador GPS - Práctica 2")
+        self.root.title("Navegador GPS - Práctica 2 y 3")
         
         self.leyendo = False
-        self.historial_puntos = [] # lista vacia donde se guardarán las coordenadas en píxeles para trazar la ruta
+        self.historial_puntos = [] 
+        self.ultimo_utm = None     # Guarda el último punto para calcular velocidad
         
+        # Cargar los datos del mapa del INSIA (Practica 3)
+        self.mapa_electronico = MapaINSIA("mapa_insia.txt") 
+        
+        # --- PANEL SUPERIOR: SISTEMA DE AVISO AL CONDUCTOR (PRÁCTICA 3) ---
+        self.frame_aviso = tk.Frame(root, bg="gray", height=100)
+        self.frame_aviso.pack(fill=tk.X, side=tk.TOP)
+        self.frame_aviso.pack_propagate(False) 
+        
+        self.lbl_velocidad = tk.Label(self.frame_aviso, text="0.0 Km/h", font=("Arial", 36, "bold"), bg="gray", fg="black")
+        self.lbl_velocidad.pack(expand=True, fill=tk.BOTH)
+        
+        self.lbl_limite = tk.Label(self.frame_aviso, text="Límite: -- Km/h | Sentido: --º", font=("Arial", 12), bg="lightgray")
+        self.lbl_limite.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # --- CONTROLES ORIGINALES ---
         frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
@@ -72,11 +152,11 @@ class NavegadorGPS:
             self.canvas.config(width=self.ancho_img, height=self.alto_img)
             self.canvas.delete("fondo") 
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.imagen_tk, tags="fondo")
-            
             self.canvas.tag_lower("fondo")
             
             self.canvas.delete("ruta")
             self.historial_puntos.clear()
+            self.ultimo_utm = None
             self.canvas.coords(self.coche, -20, -20, -20, -20) 
             
             self.label_info.config(text=f"Mapa cambiado a {nombre_mapa}. Esperando GPS...")
@@ -95,7 +175,47 @@ class NavegadorGPS:
         
         return int(x), int(y)
 
+    def calcular_velocidad_y_sentido(self, n_actual, e_actual):
+        """ Calcula velocidad en Km/h y sentido en grados (Práctica 3). """
+        if not self.ultimo_utm:
+            return 0.0, 0.0
+        
+        n_prev, e_prev = self.ultimo_utm
+        
+        # Distancia entre el punto anterior y el actual
+        distancia_m = math.sqrt((n_actual - n_prev)**2 + (e_actual - e_prev)**2)
+        
+        # Suponiendo 1Hz (1 punto por segundo), la velocidad en m/s es igual a la distancia en m
+        velocidad_kmh = (distancia_m / 1.0) * 3.6
+        
+        # Sentido de la marcha
+        delta_n = n_actual - n_prev
+        delta_e = e_actual - e_prev
+        sentido_rad = math.atan2(delta_e, delta_n)
+        sentido_grados = (math.degrees(sentido_rad) + 360) % 360
+        
+        return velocidad_kmh, sentido_grados
+
     def actualizar_interfaz(self, easting, northing, num_sats):
+        # --- LÓGICA PRÁCTICA 3 (AVISOS) ---
+        velocidad_actual, sentido = self.calcular_velocidad_y_sentido(northing, easting)
+        self.ultimo_utm = (northing, easting)
+        
+        if self.mapa_seleccionado.get() == "INSIA":
+            # Consultamos el mapa para ver qué límite tiene este punto
+            limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting)
+            color_fondo = self.mapa_electronico.evaluar_aviso(velocidad_actual, limite)
+            
+            # Cambiamos los colores de la interfaz
+            self.frame_aviso.config(bg=color_fondo)
+            self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg=color_fondo)
+            self.lbl_limite.config(text=f"Límite: {limite} Km/h | Sentido: {sentido:.1f}º", bg=color_fondo)
+        else:
+            self.frame_aviso.config(bg="gray")
+            self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg="gray")
+            self.lbl_limite.config(text="Fuera del INSIA (Sin límites)", bg="lightgray")
+
+        # --- LÓGICA PRÁCTICA 2 (DIBUJAR RUTA) ---
         x, y = self.utm_a_pixeles(easting, northing)
         
         if self.historial_puntos:
@@ -108,7 +228,6 @@ class NavegadorGPS:
                            x - self.radio_coche, y - self.radio_coche, 
                            x + self.radio_coche, y + self.radio_coche)
         self.canvas.tag_raise(self.coche)
-        
         
         texto = f"Easting: {easting:.2f} | Northing: {northing:.2f} | Satélites: {num_sats}"
         self.label_info.config(text=texto)
@@ -144,7 +263,7 @@ class NavegadorGPS:
                         self.root.after(0, self.actualizar_interfaz, utm['easting'], utm['northing'], datos['num_satelites'])
                         
         except serial.SerialException as e:
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Problema con el puerto serie:\n{e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Problema con el puerto:\n{e}"))
             self.root.after(0, self.desconectar)
         except Exception as e:
             print(f"[ERROR] Inesperado: {e}")
