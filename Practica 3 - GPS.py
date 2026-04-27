@@ -134,6 +134,19 @@ class NavegadorGPS:
         
         self.radio_coche = 6
         self.coche = self.canvas.create_oval(-20, -20, -20, -20, fill="red", outline="black", width=2)
+
+        # --- SEÑALES DE VELOCIDAD (INSIA) ---
+        # Asegúrate de tener estos ficheros en la misma carpeta del script:
+        # senal_5.png, senal_10.png, senal_15.png, senal_18.png, senal_20.png
+        self.senales_tk = {
+            5:  ImageTk.PhotoImage(Image.open("senal_5.png").resize((90, 90))),
+            10: ImageTk.PhotoImage(Image.open("senal_10.png").resize((90, 90))),
+            15: ImageTk.PhotoImage(Image.open("senal_15.png").resize((90, 90))),
+            18: ImageTk.PhotoImage(Image.open("senal_18.png").resize((90, 90))),
+            20: ImageTk.PhotoImage(Image.open("senal_20.png").resize((90, 90))),
+        }
+        self.senal_canvas_id = self.canvas.create_image(10, 10, anchor=tk.NW, image=None, tags="senal")
+        self.senal_actual_limite = None
         
         self.label_info = tk.Label(root, text="Esperando conexión...", bg="white", font=("Arial", 10), pady=5)
         self.label_info.pack(fill=tk.X, side=tk.BOTTOM)
@@ -158,6 +171,10 @@ class NavegadorGPS:
             self.historial_puntos.clear()
             self.ultimo_utm = None
             self.canvas.coords(self.coche, -20, -20, -20, -20) 
+
+            # Ocultar señal al cambiar de mapa (se mostrará en INSIA al recibir datos)
+            self.canvas.itemconfig(self.senal_canvas_id, image=None)
+            self.senal_actual_limite = None
             
             self.label_info.config(text=f"Mapa cambiado a {nombre_mapa}. Esperando GPS...")
             
@@ -210,10 +227,20 @@ class NavegadorGPS:
             self.frame_aviso.config(bg=color_fondo)
             self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg=color_fondo)
             self.lbl_limite.config(text=f"Límite: {limite} Km/h | Sentido: {sentido:.1f}º", bg=color_fondo)
+
+            # Cambiar señal según límite exacto (5, 10, 15, 18, 20)
+            limite_int = int(round(limite))
+            if limite_int in self.senales_tk and limite_int != self.senal_actual_limite:
+                self.canvas.itemconfig(self.senal_canvas_id, image=self.senales_tk[limite_int])
+                self.senal_actual_limite = limite_int
         else:
             self.frame_aviso.config(bg="gray")
             self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg="gray")
             self.lbl_limite.config(text="Fuera del INSIA (Sin límites)", bg="lightgray")
+
+            # Fuera de INSIA no mostramos señal
+            self.canvas.itemconfig(self.senal_canvas_id, image=None)
+            self.senal_actual_limite = None
 
         # --- LÓGICA PRÁCTICA 2 (DIBUJAR RUTA) ---
         x, y = self.utm_a_pixeles(easting, northing)
@@ -228,6 +255,9 @@ class NavegadorGPS:
                            x - self.radio_coche, y - self.radio_coche, 
                            x + self.radio_coche, y + self.radio_coche)
         self.canvas.tag_raise(self.coche)
+        
+        # Asegurar que la señal quede visible por encima del fondo y la ruta
+        self.canvas.tag_raise("senal")
         
         texto = f"Easting: {easting:.2f} | Northing: {northing:.2f} | Satélites: {num_sats}"
         self.label_info.config(text=texto)
