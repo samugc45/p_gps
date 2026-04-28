@@ -9,16 +9,12 @@ import os
 from parseo_tramas import parsear_gga
 from conversion_utm import geograficas_a_utm
 
-# =====================================================================
-# CLASE PARA LA PRÁCTICA 3: MAPA INSIA Y AVISO AL CONDUCTOR
-# =====================================================================
 class MapaINSIA:
     def __init__(self, ruta_archivo):
         self.puntos = []
         self.cargar_mapa(ruta_archivo)
 
     def cargar_mapa(self, ruta_archivo):
-        """Carga el mapa txt con formato: UTM_Norte UTM_Este Velocidad_Maxima"""
         if not os.path.exists(ruta_archivo):
             print(f"[AVISO] No se encontró el archivo '{ruta_archivo}'. Crea este archivo para que funcione el aviso.")
             return
@@ -38,7 +34,6 @@ class MapaINSIA:
             print(f"[ERROR] No se pudo cargar el mapa: {e}")
 
     def obtener_limite_velocidad(self, utm_n, utm_e):
-        """Busca el punto más cercano y devuelve su límite de velocidad."""
         if not self.puntos:
             return 0
 
@@ -54,10 +49,8 @@ class MapaINSIA:
         return limite_actual
 
     def evaluar_aviso(self, velocidad_actual, velocidad_maxima):
-        """Devuelve verde, amarillo o rojo según la velocidad actual y el límite."""
         if velocidad_maxima == 0:
             return "gray"
-
         margen = velocidad_maxima * 0.10
         if velocidad_actual < (velocidad_maxima - margen):
             return "green"
@@ -66,9 +59,7 @@ class MapaINSIA:
         else:
             return "yellow"
 
-# =====================================================================
-# CONFIGURACIÓN DE LOS MAPAS EN PANTALLA
-# =====================================================================
+
 MAPAS = {
     "Campus Sur": {
         "archivo": "etsisi.PNG",
@@ -82,9 +73,7 @@ MAPAS = {
     }
 }
 
-# =====================================================================
-# INTERFAZ GRÁFICA PRINCIPAL
-# =====================================================================
+
 class NavegadorGPS:
     def __init__(self, root):
         self.root = root
@@ -92,12 +81,10 @@ class NavegadorGPS:
         
         self.leyendo = False
         self.historial_puntos = [] 
-        self.ultimo_utm = None     # Guarda el último punto para calcular velocidad
+        self.ultimo_utm = None     
         
-        # Cargar los datos del mapa del INSIA (Practica 3)
         self.mapa_electronico = MapaINSIA("mapa_insia.txt") 
         
-        # --- PANEL SUPERIOR: SISTEMA DE AVISO AL CONDUCTOR (PRÁCTICA 3) ---
         self.frame_aviso = tk.Frame(root, bg="gray", height=100)
         self.frame_aviso.pack(fill=tk.X, side=tk.TOP)
         self.frame_aviso.pack_propagate(False) 
@@ -108,7 +95,6 @@ class NavegadorGPS:
         self.lbl_limite = tk.Label(self.frame_aviso, text="Límite: -- Km/h | Sentido: --º", font=("Arial", 12), bg="lightgray")
         self.lbl_limite.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # --- CONTROLES ORIGINALES ---
         frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
@@ -135,9 +121,6 @@ class NavegadorGPS:
         self.radio_coche = 6
         self.coche = self.canvas.create_oval(-20, -20, -20, -20, fill="red", outline="black", width=2)
 
-        # --- SEÑALES DE VELOCIDAD (INSIA) ---
-        # Asegúrate de tener estos ficheros en la misma carpeta del script:
-        # senal_5.png, senal_10.png, senal_15.png, senal_18.png, senal_20.png
         self.senales_tk = {
             5:  ImageTk.PhotoImage(Image.open("senal_5.png").resize((90, 90))),
             10: ImageTk.PhotoImage(Image.open("senal_10.png").resize((90, 90))),
@@ -172,7 +155,6 @@ class NavegadorGPS:
             self.ultimo_utm = None
             self.canvas.coords(self.coche, -20, -20, -20, -20) 
 
-            # Ocultar señal al cambiar de mapa (se mostrará en INSIA al recibir datos)
             self.canvas.itemconfig(self.senal_canvas_id, image=None)
             self.senal_actual_limite = None
             
@@ -193,19 +175,16 @@ class NavegadorGPS:
         return int(x), int(y)
 
     def calcular_velocidad_y_sentido(self, n_actual, e_actual):
-        """ Calcula velocidad en Km/h y sentido en grados (Práctica 3). """
+        """ Calcula velocidad en Km/h y sentido en grados. """
         if not self.ultimo_utm:
             return 0.0, 0.0
         
         n_prev, e_prev = self.ultimo_utm
         
-        # Distancia entre el punto anterior y el actual
         distancia_m = math.sqrt((n_actual - n_prev)**2 + (e_actual - e_prev)**2)
         
-        # Suponiendo 1Hz (1 punto por segundo), la velocidad en m/s es igual a la distancia en m
         velocidad_kmh = (distancia_m / 1.0) * 3.6
         
-        # Sentido de la marcha
         delta_n = n_actual - n_prev
         delta_e = e_actual - e_prev
         sentido_rad = math.atan2(delta_e, delta_n)
@@ -214,21 +193,17 @@ class NavegadorGPS:
         return velocidad_kmh, sentido_grados
 
     def actualizar_interfaz(self, easting, northing, num_sats):
-        # --- LÓGICA PRÁCTICA 3 (AVISOS) ---
         velocidad_actual, sentido = self.calcular_velocidad_y_sentido(northing, easting)
         self.ultimo_utm = (northing, easting)
         
         if self.mapa_seleccionado.get() == "INSIA":
-            # Consultamos el mapa para ver qué límite tiene este punto
             limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting)
             color_fondo = self.mapa_electronico.evaluar_aviso(velocidad_actual, limite)
             
-            # Cambiamos los colores de la interfaz
             self.frame_aviso.config(bg=color_fondo)
             self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg=color_fondo)
             self.lbl_limite.config(text=f"Límite: {limite} Km/h | Sentido: {sentido:.1f}º", bg=color_fondo)
 
-            # Cambiar señal según límite exacto (5, 10, 15, 18, 20)
             limite_int = int(round(limite))
             if limite_int in self.senales_tk and limite_int != self.senal_actual_limite:
                 self.canvas.itemconfig(self.senal_canvas_id, image=self.senales_tk[limite_int])
@@ -238,11 +213,9 @@ class NavegadorGPS:
             self.lbl_velocidad.config(text=f"{velocidad_actual:.1f} Km/h", bg="gray")
             self.lbl_limite.config(text="Fuera del INSIA (Sin límites)", bg="lightgray")
 
-            # Fuera de INSIA no mostramos señal
             self.canvas.itemconfig(self.senal_canvas_id, image=None)
             self.senal_actual_limite = None
 
-        # --- LÓGICA PRÁCTICA 2 (DIBUJAR RUTA) ---
         x, y = self.utm_a_pixeles(easting, northing)
         
         if self.historial_puntos:
@@ -256,7 +229,6 @@ class NavegadorGPS:
                            x + self.radio_coche, y + self.radio_coche)
         self.canvas.tag_raise(self.coche)
         
-        # Asegurar que la señal quede visible por encima del fondo y la ruta
         self.canvas.tag_raise("senal")
         
         texto = f"Easting: {easting:.2f} | Northing: {northing:.2f} | Satélites: {num_sats}"
