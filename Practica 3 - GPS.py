@@ -16,7 +16,7 @@ class MapaINSIA:
 
     def cargar_mapa(self, ruta_archivo):
         if not os.path.exists(ruta_archivo):
-            print(f"[AVISO] No se encontró el archivo '{ruta_archivo}'. Crea este archivo para que funcione el aviso.")
+            print(f"[AVISO] No se encontró el archivo '{ruta_archivo}'.")
             return
             
         try:
@@ -29,11 +29,26 @@ class MapaINSIA:
                             este = float(partes[1])
                             v_max = float(partes[2])
                             self.puntos.append({'N': norte, 'E': este, 'Vmax': v_max})
-            print(f"[INFO] Mapa INSIA cargado correctamente con {len(self.puntos)} puntos.")
+            
+            # NUEVO: Calcular el sentido (grados) de cada tramo de la pista
+            for i in range(len(self.puntos) - 1):
+                p_actual = self.puntos[i]
+                p_sig = self.puntos[i+1]
+                delta_n = p_sig['N'] - p_actual['N']
+                delta_e = p_sig['E'] - p_actual['E']
+                sentido_rad = math.atan2(delta_e, delta_n)
+                p_actual['Sentido'] = (math.degrees(sentido_rad) + 360) % 360
+                
+            # Al último punto le ponemos el mismo sentido que al anterior para que no falle
+            if len(self.puntos) > 1:
+                self.puntos[-1]['Sentido'] = self.puntos[-2]['Sentido']
+                
+            print(f"[INFO] Mapa INSIA cargado con {len(self.puntos)} puntos y sentidos calculados.")
         except Exception as e:
             print(f"[ERROR] No se pudo cargar el mapa: {e}")
 
-    def obtener_limite_velocidad(self, utm_n, utm_e):
+    # NUEVO: Ahora recibe el sentido del coche también
+    def obtener_limite_velocidad(self, utm_n, utm_e, sentido_coche):
         if not self.puntos:
             return 0
 
@@ -42,11 +57,26 @@ class MapaINSIA:
 
         for p in self.puntos:
             dist = math.sqrt((utm_n - p['N'])**2 + (utm_e - p['E'])**2)
-            if dist < distancia_minima:
+            
+            # Calcular la diferencia de ángulo entre el coche y la pista
+            if 'Sentido' in p:
+                diff_angulo = abs((sentido_coche - p['Sentido']) % 360)
+                if diff_angulo > 180:
+                    diff_angulo = 360 - diff_angulo
+                
+                # SOLO aceptamos el punto si vamos en la misma dirección (margen de +/- 90 grados)
+                es_mismo_sentido = diff_angulo <= 90
+            else:
+                es_mismo_sentido = True # Por si hay algún fallo
+
+            if es_mismo_sentido and dist < distancia_minima:
                 distancia_minima = dist
                 limite_actual = p['Vmax']
 
-        return limite_actual
+        # Si el punto válido más cercano está a menos de 15 metros, devolvemos su límite
+        if distancia_minima < 15:
+            return limite_actual
+        return 0
 
     def evaluar_aviso(self, velocidad_actual, velocidad_maxima):
         if velocidad_maxima == 0:
@@ -58,7 +88,6 @@ class MapaINSIA:
             return "red"
         else:
             return "yellow"
-
 
 MAPAS = {
     "Campus Sur": {
@@ -175,7 +204,6 @@ class NavegadorGPS:
         return int(x), int(y)
 
     def calcular_velocidad_y_sentido(self, n_actual, e_actual):
-        """ Calcula velocidad en Km/h y sentido en grados. """
         if not self.ultimo_utm:
             return 0.0, 0.0
         
@@ -192,12 +220,13 @@ class NavegadorGPS:
         
         return velocidad_kmh, sentido_grados
 
-    def actualizar_interfaz(self, easting, northing, num_sats):
+def actualizar_interfaz(self, easting, northing, num_sats):
         velocidad_actual, sentido = self.calcular_velocidad_y_sentido(northing, easting)
         self.ultimo_utm = (northing, easting)
         
         if self.mapa_seleccionado.get() == "INSIA":
-            limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting)
+            # NUEVO: Aquí le pasamos el "sentido" para que sepa en qué dirección vamos
+            limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting, sentido)
             color_fondo = self.mapa_electronico.evaluar_aviso(velocidad_actual, limite)
             
             self.frame_aviso.config(bg=color_fondo)
