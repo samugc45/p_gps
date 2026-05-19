@@ -12,7 +12,7 @@ from parseo_tramas import parsear_gga
 from conversion_utm import geograficas_a_utm
 
 # ==========================================
-# CLASE MAPA INSIA (PRÁCTICA 3)
+# CLASE MAPA INSIA (Gestión de límites)
 # ==========================================
 class MapaINSIA:
     def __init__(self, ruta_archivo):
@@ -63,31 +63,31 @@ class MapaINSIA:
         elif velocidad_actual > (velocidad_maxima + margen): return "red"
         else: return "yellow"
 
-MAPAS_ESTATICOS = {
-    "Campus Sur": {"archivo": "etsisi.PNG", "E_MIN": 446193.0, "N_MAX": 4471374.0, "E_MAX": 447008.0, "N_MIN": 4470787.0},
-    "INSIA": {"archivo": "insia.PNG", "E_MIN": 446237.0, "N_MAX": 4470980.0, "E_MAX": 446444.0, "N_MIN": 4470777.0}
-}
-
 # ==========================================
-# GUI: NAVEGADOR GPS UNIFICADO
+# GUI: NAVEGADOR GPS AVANZADO
 # ==========================================
 class NavegadorGPS:
     def __init__(self, root):
         self.root = root
-        self.root.title("Navegador GPS Avanzado - MapQuest (Satélite)")
+        self.root.title("Navegador GPS - Edición Profesional")
         
-        # --- AQUÍ PONES TU CLAVE DE MAPQUEST ---
-        self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA" # Clave que caduca+++++++++++
+        # --- ¡PON TU CLAVE DE MAPQUEST AQUÍ! ---
+        self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA"
         
         self.leyendo = False
-        self.historial_puntos_pixeles = [] 
         self.ultimo_utm = None     
         self.mapa_electronico = MapaINSIA("mapa_insia.txt") 
         self.descargando_mapa = False
         
-        # --- VARIABLES MEJORA PERSONAL (Ordenador a bordo) ---
+        # NUEVO: historial GPS para estela
+        self.historial_gps = []
+
+        # Variables de Mejora Personal
         self.distancia_total = 0.0
         self.lecturas_velocidad = []
+        self.nivel_zoom = 18
+        self.tipo_vista = tk.StringVar(value="hyb") # hyb=Satélite, map=Calles
+        self.rotar_mapa = tk.BooleanVar(value=False) # Modo Track-Up
         
         # UI: Avisos Superiores
         self.frame_aviso = tk.Frame(root, bg="gray", height=120)
@@ -97,43 +97,51 @@ class NavegadorGPS:
         self.lbl_velocidad = tk.Label(self.frame_aviso, text="0.0 Km/h", font=("Arial", 32, "bold"), bg="gray", fg="black")
         self.lbl_velocidad.pack(expand=True, fill=tk.BOTH)
         
-        # Etiqueta de la Mejora Personal
         self.lbl_trip = tk.Label(self.frame_aviso, text="Recorrido: 0.0 m | V. Media: 0.0 Km/h", font=("Arial", 11, "bold"), bg="black", fg="white")
         self.lbl_trip.pack(fill=tk.X)
 
         self.lbl_limite = tk.Label(self.frame_aviso, text="Límite: -- Km/h | Sentido: --º", font=("Arial", 11), bg="lightgray")
         self.lbl_limite.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # UI: Controles
+        # UI: Controles Base
         frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
         tk.Label(frame_controles, text="Puerto:").pack(side=tk.LEFT)
         self.entry_puerto = tk.Entry(frame_controles, width=8)
         self.entry_puerto.insert(0, "COM1") 
-        self.entry_puerto.pack(side=tk.LEFT, padx=2)
+        self.entry_puerto.pack(side=tk.LEFT, padx=5)
         
-        self.btn_conectar = tk.Button(frame_controles, text="Conectar", command=self.iniciar_conexion, bg="lightblue")
+        self.btn_conectar = tk.Button(frame_controles, text="Conectar GPS", command=self.iniciar_conexion, bg="lightblue", font=("Arial", 10, "bold"))
         self.btn_conectar.pack(side=tk.LEFT, padx=5)
-        
-        tk.Label(frame_controles, text="Mapa:").pack(side=tk.LEFT, padx=(5, 0))
-        self.mapa_seleccionado = tk.StringVar(value="Campus Sur")
-        opciones_mapa = list(MAPAS_ESTATICOS.keys()) + ["Internet (MapQuest Satélite)"]
-        combo_mapas = ttk.Combobox(frame_controles, textvariable=self.mapa_seleccionado, values=opciones_mapa, state="readonly", width=24)
-        combo_mapas.pack(side=tk.LEFT, padx=5)
-        combo_mapas.bind("<<ComboboxSelected>>", self.cambiar_mapa)
 
-        # UI: Canvas
+        # UI: MEJORAS PERSONALES (Capa, Zoom, Orientación)
+        frame_mejoras = tk.Frame(root, padx=10, pady=5)
+        frame_mejoras.pack(fill=tk.X)
+
+        # Capas
+        tk.Label(frame_mejoras, text="Capa:").pack(side=tk.LEFT)
+        ttk.Radiobutton(frame_mejoras, text="Satélite", variable=self.tipo_vista, value="hyb").pack(side=tk.LEFT)
+        ttk.Radiobutton(frame_mejoras, text="Calles", variable=self.tipo_vista, value="map").pack(side=tk.LEFT, padx=(0, 10))
+
+        # Zoom
+        tk.Button(frame_mejoras, text="➖", command=self.zoom_out, width=2).pack(side=tk.LEFT)
+        self.lbl_zoom = tk.Label(frame_mejoras, text=f"Z: {self.nivel_zoom}", width=5)
+        self.lbl_zoom.pack(side=tk.LEFT)
+        tk.Button(frame_mejoras, text="➕", command=self.zoom_in, width=2).pack(side=tk.LEFT, padx=(0, 10))
+
+        # Orientación
+        ttk.Checkbutton(frame_mejoras, text="Rotar Mapa (Track-Up)", variable=self.rotar_mapa).pack(side=tk.LEFT, padx=10)
+
+        # UI: Canvas (El mapa)
         self.ancho_canvas, self.alto_canvas = 600, 600
         self.canvas = tk.Canvas(root, bg="black", width=self.ancho_canvas, height=self.alto_canvas)
         self.canvas.pack()
         
         self.imagen_tk = None
-        self.mapa_actual = None
-        
         self.coche = self.canvas.create_polygon(0,0, 0,0, 0,0, fill="red", outline="white", width=2, tags="coche")
 
-        # Señales
+        # Cargar señales
         self.senales_tk = {}
         for s in [5, 10, 15, 18, 20]:
             try: self.senales_tk[s] = ImageTk.PhotoImage(Image.open(f"senal_{s}.png").resize((90, 90)))
@@ -142,8 +150,17 @@ class NavegadorGPS:
         
         self.label_info = tk.Label(root, text="Esperando conexión...", bg="white", font=("Arial", 10), pady=5)
         self.label_info.pack(fill=tk.X, side=tk.BOTTOM)
-        
-        self.cambiar_mapa()
+
+    # --- FUNCIONES DE BOTONES ZOOM ---
+    def zoom_in(self):
+        if self.nivel_zoom < 20:
+            self.nivel_zoom += 1
+            self.lbl_zoom.config(text=f"Z: {self.nivel_zoom}")
+
+    def zoom_out(self):
+        if self.nivel_zoom > 10:
+            self.nivel_zoom -= 1
+            self.lbl_zoom.config(text=f"Z: {self.nivel_zoom}")
 
     def dibujar_coche_flecha(self, x, y, sentido_grados):
         r_largo = 14; r_corto = 8   
@@ -156,40 +173,6 @@ class NavegadorGPS:
         y3 = y - math.cos(math.radians(sentido_grados + 140)) * r_corto
         self.canvas.coords(self.coche, x1, y1, x2, y2, x3, y3)
 
-    def cambiar_mapa(self, event=None):
-        nombre_mapa = self.mapa_seleccionado.get()
-        self.canvas.delete("ruta")
-        self.historial_puntos_pixeles.clear()
-        
-        if nombre_mapa in MAPAS_ESTATICOS:
-            self.mapa_actual = MAPAS_ESTATICOS[nombre_mapa]
-            try:
-                imagen_pil = Image.open(self.mapa_actual["archivo"])
-                self.ancho_canvas, self.alto_canvas = imagen_pil.size
-                self.imagen_tk = ImageTk.PhotoImage(imagen_pil)
-                self.canvas.config(width=self.ancho_canvas, height=self.alto_canvas)
-                self.canvas.delete("fondo") 
-                self.canvas.create_image(0, 0, anchor=tk.NW, image=self.imagen_tk, tags="fondo")
-                self.canvas.tag_lower("fondo")
-            except: pass
-        else:
-            self.mapa_actual = None
-            self.ancho_canvas, self.alto_canvas = 600, 600
-            self.canvas.config(width=self.ancho_canvas, height=self.alto_canvas)
-            self.canvas.delete("fondo")
-
-        self.canvas.tag_raise("coche")
-        self.canvas.tag_raise("senal")
-        self.canvas.itemconfig(self.senal_canvas_id, image=None)
-
-    def utm_a_pixeles(self, easting, northing):
-        if not self.mapa_actual: return self.ancho_canvas // 2, self.alto_canvas // 2
-        E_MIN, E_MAX = self.mapa_actual["E_MIN"], self.mapa_actual["E_MAX"]
-        N_MIN, N_MAX = self.mapa_actual["N_MIN"], self.mapa_actual["N_MAX"]
-        x = ((easting - E_MIN) / (E_MAX - E_MIN)) * self.ancho_canvas
-        y = ((N_MAX - northing) / (N_MAX - N_MIN)) * self.alto_canvas
-        return int(x), int(y)
-
     def calcular_velocidad_y_sentido(self, n_actual, e_actual):
         if not self.ultimo_utm: return 0.0, 0.0, 0.0
         n_prev, e_prev = self.ultimo_utm
@@ -199,13 +182,53 @@ class NavegadorGPS:
         sentido_grados = (math.degrees(sentido_rad) + 360) % 360
         return velocidad_kmh, sentido_grados, distancia_m
 
-    def peticion_mapquest(self, lat, lon, api_key):
+    # --- CONVERSIÓN LAT/LON A PÍXEL EN CANVAS (Web Mercator) ---
+    def _latlon_to_world_px(self, lat, lon, zoom):
+        tile_size = 256
+        siny = math.sin(math.radians(lat))
+        siny = min(max(siny, -0.9999), 0.9999)
+        scale = tile_size * (2 ** zoom)
+        x = (lon + 180.0) / 360.0 * scale
+        y = (0.5 - math.log((1 + siny) / (1 - siny)) / (4 * math.pi)) * scale
+        return x, y
+
+    def latlon_to_screen(self, lat, lon, center_lat, center_lon):
+        world_x, world_y = self._latlon_to_world_px(lat, lon, self.nivel_zoom)
+        center_x, center_y = self._latlon_to_world_px(center_lat, center_lon, self.nivel_zoom)
+        screen_x = (world_x - center_x) + self.ancho_canvas / 2
+        screen_y = (world_y - center_y) + self.alto_canvas / 2
+        return screen_x, screen_y
+
+    def rotar_punto(self, x, y, cx, cy, ang_deg):
+        # En coordenadas de pantalla (Y hacia abajo), para igualar PIL.rotate (CCW visual)
+        ang = math.radians(ang_deg)
+        dx, dy = x - cx, y - cy
+        rx = dx * math.cos(ang) - dy * math.sin(ang) + cx
+        ry = dx * math.sin(ang) + dy * math.cos(ang) + cy
+        return rx, ry
+
+    def peticion_mapquest(self, lat, lon, sentido):
+        # Si rotamos el mapa, pedimos una imagen más grande (850x850) para que al girar no salgan esquinas negras
+        ancho_req = 850 if self.rotar_mapa.get() else self.ancho_canvas
+        alto_req = 850 if self.rotar_mapa.get() else self.alto_canvas
+        
         url = (f"https://www.mapquestapi.com/staticmap/v5/map?"
-               f"key={api_key}&center={lat},{lon}&zoom=18&"
-               f"size={self.ancho_canvas},{self.alto_canvas}&type=hyb")
+               f"key={self.API_KEY}&center={lat},{lon}&zoom={self.nivel_zoom}&"
+               f"size={ancho_req},{alto_req}&type={self.tipo_vista.get()}")
         try:
             res = requests.get(url, timeout=3)
-            if res.status_code == 200: return Image.open(BytesIO(res.content))
+            if res.status_code == 200:
+                img = Image.open(BytesIO(res.content))
+                
+                # ROTACIÓN DEL MAPA (Magia Pura)
+                if self.rotar_mapa.get():
+                    img = img.rotate(sentido, resample=Image.BICUBIC)
+                    # Recortamos el centro (600x600) para quitar las esquinas feas del giro
+                    borde_izq = (850 - 600) // 2
+                    borde_sup = (850 - 600) // 2
+                    img = img.crop((borde_izq, borde_sup, borde_izq + 600, borde_sup + 600))
+                
+                return img
         except: pass
         return None
 
@@ -216,11 +239,11 @@ class NavegadorGPS:
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.imagen_tk, tags="fondo")
             self.canvas.tag_lower("fondo")
 
-    def descargar_mapa_async(self, lat, lon, api_key):
+    def descargar_mapa_async(self, lat, lon, sentido):
         if self.descargando_mapa: return
         self.descargando_mapa = True
         def tarea_fondo():
-            img = self.peticion_mapquest(lat, lon, api_key)
+            img = self.peticion_mapquest(lat, lon, sentido)
             if img: self.root.after(0, self.actualizar_imagen_mapa, img)
             self.descargando_mapa = False
         threading.Thread(target=tarea_fondo, daemon=True).start()
@@ -229,27 +252,47 @@ class NavegadorGPS:
         vel, sentido, dist_m = self.calcular_velocidad_y_sentido(northing, easting)
         self.ultimo_utm = (northing, easting)
 
-        # --- LÓGICA ORDENADOR DE A BORDO ---
+        # Ordenador de a bordo
         self.distancia_total += dist_m
-        if vel > 0.5: # Solo hacemos media si el coche se mueve algo
+        if vel > 0.5:
             self.lecturas_velocidad.append(vel)
         v_media = sum(self.lecturas_velocidad) / len(self.lecturas_velocidad) if self.lecturas_velocidad else 0.0
-        
         self.lbl_trip.config(text=f"Recorrido: {self.distancia_total:.1f} m  |  V. Media: {v_media:.1f} Km/h")
 
-        if self.mapa_seleccionado.get() != "Internet (MapQuest Satélite)":
-            x, y = self.utm_a_pixeles(easting, northing)
-            if self.historial_puntos_pixeles:
-                ult_x, ult_y = self.historial_puntos_pixeles[-1]
-                self.canvas.create_line(ult_x, ult_y, x, y, fill="blue", width=3, tags="ruta")
-            self.historial_puntos_pixeles.append((x, y))
-        else:
-            x, y = self.ancho_canvas // 2, self.alto_canvas // 2
+        # --- ESTELA AZUL (BRUNO) ---
+        self.historial_gps.append((lat, lon))
+        self.canvas.delete("ruta")
 
-        self.dibujar_coche_flecha(x, y, sentido)
+        if len(self.historial_gps) > 1:
+            puntos = []
+            cx, cy = self.ancho_canvas // 2, self.alto_canvas // 2
+
+            for plat, plon in self.historial_gps:
+                x, y = self.latlon_to_screen(plat, plon, lat, lon)
+
+                # Si el mapa rota, rotamos también la estela para que coincida
+                if self.rotar_mapa.get():
+                    # Usamos ángulo negativo para igualar la rotación visual CCW de PIL
+                    x, y = self.rotar_punto(x, y, cx, cy, -sentido)
+
+                puntos.extend([x, y])
+
+            if len(puntos) >= 4:
+                self.canvas.create_line(puntos, fill="blue", width=3, tags="ruta")
+
+        # Dibujar Coche
+        cx, cy = self.ancho_canvas // 2, self.alto_canvas // 2
+        
+        # Si el mapa rota, el coche siempre apunta al Norte (Arriba de la pantalla = 0º)
+        if self.rotar_mapa.get():
+            self.dibujar_coche_flecha(cx, cy, 0)
+        else:
+            self.dibujar_coche_flecha(cx, cy, sentido)
+            
         self.canvas.tag_raise("coche")
         self.canvas.tag_raise("senal")
 
+        # Límites INSIA
         limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting, sentido)
         if limite > 0:
             color = self.mapa_electronico.evaluar_aviso(vel, limite)
@@ -276,13 +319,10 @@ class NavegadorGPS:
 
     def leer_gps_continuamente(self, puerto):
         try:
-            # Nota: Algunos G-MOUSE modernos van mejor a 9600 baudios. 
-            # Si a 4800 te va bien a baja velocidad, déjalo así.
             ser = serial.Serial(port=puerto, baudrate=4800, timeout=1)
             self.root.after(0, lambda: self.label_info.config(text="GPS Conectado. Procesando..."))
-            
             while self.leyendo:
-                try: # <-- ESTE TRY NUEVO EVITA QUE PETE CON LÍNEAS CORRUPTAS
+                try: 
                     linea = ser.readline().decode("ascii", errors="replace").strip()
                     if "$GPGGA" in linea or "$GNGGA" in linea:
                         datos = parsear_gga(linea)
@@ -291,22 +331,22 @@ class NavegadorGPS:
                             alt = datos.get("altitud", 0.0)
                             utm = geograficas_a_utm(lat, lon)
                             
+                            vel, sentido, dist = self.calcular_velocidad_y_sentido(utm['northing'], utm['easting'])
+                            
                             self.root.after(0, self.actualizar_interfaz, lat, lon, alt, utm['easting'], utm['northing'], datos['num_satelites'])
                             
-                            if self.mapa_seleccionado.get() == "Internet (MapQuest Satélite)":
-                                if self.API_KEY and "Pon_Tu_Clave" not in self.API_KEY:
-                                    self.descargar_mapa_async(lat, lon, self.API_KEY)
-                except Exception as e_linea:
-                    # Si la línea viene rota a 80km/h, la ignoramos silenciosamente y seguimos
+                            if self.API_KEY and "Pon_Tu_Clave" not in self.API_KEY:
+                                self.descargar_mapa_async(lat, lon, sentido)
+                except Exception:
                     continue
-                    
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Problema puerto:\n{e}"))
             self.root.after(0, self.desconectar)
 
     def desconectar(self):
         self.leyendo = False
-        self.btn_conectar.config(text="Conectar", state=tk.NORMAL)
+        self.btn_conectar.config(text="Conectar GPS", state=tk.NORMAL)
+        self.label_info.config(text="Desconectado.")
 
     def cerrar(self):
         self.leyendo = False
