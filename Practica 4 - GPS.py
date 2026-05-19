@@ -276,21 +276,30 @@ class NavegadorGPS:
 
     def leer_gps_continuamente(self, puerto):
         try:
+            # Nota: Algunos G-MOUSE modernos van mejor a 9600 baudios. 
+            # Si a 4800 te va bien a baja velocidad, déjalo así.
             ser = serial.Serial(port=puerto, baudrate=4800, timeout=1)
+            self.root.after(0, lambda: self.label_info.config(text="GPS Conectado. Procesando..."))
+            
             while self.leyendo:
-                linea = ser.readline().decode("ascii", errors="replace").strip()
-                if "$GPGGA" in linea or "$GNGGA" in linea:
-                    datos = parsear_gga(linea)
-                    if datos and datos.get("calidad_fix", 0) > 0:
-                        lat, lon = datos["latitud_decimal"], datos["longitud_decimal"]
-                        alt = datos.get("altitud", 0.0)
-                        utm = geograficas_a_utm(lat, lon)
-                        
-                        self.root.after(0, self.actualizar_interfaz, lat, lon, alt, utm['easting'], utm['northing'], datos['num_satelites'])
-                        
-                        if self.mapa_seleccionado.get() == "Internet (MapQuest Satélite)":
-                            if self.API_KEY and "Pon_Tu_Clave" not in self.API_KEY:
-                                self.descargar_mapa_async(lat, lon, self.API_KEY)
+                try: # <-- ESTE TRY NUEVO EVITA QUE PETE CON LÍNEAS CORRUPTAS
+                    linea = ser.readline().decode("ascii", errors="replace").strip()
+                    if "$GPGGA" in linea or "$GNGGA" in linea:
+                        datos = parsear_gga(linea)
+                        if datos and datos.get("calidad_fix", 0) > 0:
+                            lat, lon = datos["latitud_decimal"], datos["longitud_decimal"]
+                            alt = datos.get("altitud", 0.0)
+                            utm = geograficas_a_utm(lat, lon)
+                            
+                            self.root.after(0, self.actualizar_interfaz, lat, lon, alt, utm['easting'], utm['northing'], datos['num_satelites'])
+                            
+                            if self.mapa_seleccionado.get() == "Internet (MapQuest Satélite)":
+                                if self.API_KEY and "Pon_Tu_Clave" not in self.API_KEY:
+                                    self.descargar_mapa_async(lat, lon, self.API_KEY)
+                except Exception as e_linea:
+                    # Si la línea viene rota a 80km/h, la ignoramos silenciosamente y seguimos
+                    continue
+                    
         except Exception as e:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Problema puerto:\n{e}"))
             self.root.after(0, self.desconectar)

@@ -220,7 +220,7 @@ class NavegadorGPS:
         
         return velocidad_kmh, sentido_grados
 
-def actualizar_interfaz(self, easting, northing, num_sats):
+    def actualizar_interfaz(self, easting, northing, num_sats):
         velocidad_actual, sentido = self.calcular_velocidad_y_sentido(northing, easting)
         self.ultimo_utm = (northing, easting)
         
