@@ -12,20 +12,6 @@ from parseo_tramas import parsear_gga
 from conversion_utm import geograficas_a_utm
 
 # ==========================================
-# CONFIGURACIÓN DE LOS SERVIDORES WMS (IGN)
-# ==========================================
-TIPOS_MAPA = {
-    "Satélite (PNOA)": {
-        "url": "https://www.ign.es/wms-inspire/pnoa-ma?",
-        "layer": "OI.OrthoimageCoverage"
-    },
-    "Callejero (IGN Base)": {
-        "url": "https://www.ign.es/wms-inspire/ign-base?",
-        "layer": "IGNBaseTodo"
-    }
-}
-
-# ==========================================
 # CLASE MAPA INSIA (Gestión de límites)
 # ==========================================
 class MapaINSIA:
@@ -41,13 +27,8 @@ class MapaINSIA:
                     if linea.strip():
                         partes = linea.replace(',', ' ').split()
                         if len(partes) >= 3:
-                            self.puntos.append({
-                                'N': float(partes[0]), 
-                                'E': float(partes[1]), 
-                                'Vmax': float(partes[2])
-                            })
+                            self.puntos.append({'N': float(partes[0]), 'E': float(partes[1]), 'Vmax': float(partes[2])})
             
-            # Cálculo del sentido de la marcha para cada tramo
             for i in range(len(self.puntos) - 1):
                 p_actual = self.puntos[i]
                 p_sig = self.puntos[i+1]
@@ -56,27 +37,23 @@ class MapaINSIA:
                 
             if len(self.puntos) > 1:
                 self.puntos[-1]['Sentido'] = self.puntos[-2]['Sentido']
-        except Exception as e:
-            print(f"[ERROR] Al cargar mapa: {e}")
+        except: pass
 
     def obtener_limite_velocidad(self, utm_n, utm_e, sentido_coche):
         if not self.puntos: return 0
         distancia_minima = float('inf')
         limite_actual = 0
-        
         for p in self.puntos:
             dist = math.sqrt((utm_n - p['N'])**2 + (utm_e - p['E'])**2)
             if 'Sentido' in p:
                 diff_angulo = abs((sentido_coche - p['Sentido']) % 360)
                 if diff_angulo > 180: diff_angulo = 360 - diff_angulo
                 es_mismo_sentido = diff_angulo <= 90
-            else:
-                es_mismo_sentido = True
+            else: es_mismo_sentido = True
 
             if es_mismo_sentido and dist < distancia_minima:
                 distancia_minima = dist
                 limite_actual = p['Vmax']
-                
         return limite_actual if distancia_minima < 15 else 0
 
     def evaluar_aviso(self, velocidad_actual, velocidad_maxima):
@@ -87,242 +64,283 @@ class MapaINSIA:
         else: return "yellow"
 
 # ==========================================
-# PRÁCTICA 4: MATEMÁTICAS DEL IGN Y BBOX
-# ==========================================
-def bbox_from_center_zoom_vertical(lat, lon, zoom, width, height):
-    """Calcula la caja (Bounding Box) exacta en grados para el servidor IGN"""
-    base_half_side_deg = 0.1  
-    half_side_y = base_half_side_deg / (2 ** (zoom - 1))
-    half_side_x = half_side_y * (width / height) / math.cos(math.radians(lat))
-    
-    min_lat = lat - half_side_y
-    max_lat = lat + half_side_y
-    min_lon = lon - half_side_x
-    max_lon = lon + half_side_x
-    return min_lat, min_lon, max_lat, max_lon
-
-# ==========================================
-# INTERFAZ GRÁFICA PRINCIPAL (GUI)
+# GUI: NAVEGADOR GPS AVANZADO
 # ==========================================
 class NavegadorGPS:
     def __init__(self, root):
         self.root = root
-        self.root.title("Navegador GPS - Práctica 4 (Estela Activa)")
+        self.root.title("Navegador GPS - Edición Profesional")
+        
+        # --- ¡PON TU CLAVE DE MAPQUEST AQUÍ! ---
+        self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA"
         
         self.leyendo = False
-        self.ultimo_utm = None
-        self.historial_gps = [] # NUEVO: Aquí guardamos las coordenadas (Lat, Lon) reales por las que pasamos
+        self.ultimo_utm = None     
         self.mapa_electronico = MapaINSIA("mapa_insia.txt") 
+        self.descargando_mapa = False
         
-        self.ancho_canvas = 800
-        self.alto_canvas = 600
-        
-        self.construir_interfaz()
+        # NUEVO: historial GPS para estela
+        self.historial_gps = []
 
-    def construir_interfaz(self):
-        # Panel Superior de Avisos (Velocidad gigante)
-        self.frame_aviso = tk.Frame(self.root, bg="gray", height=100)
+        # Variables de Mejora Personal
+        self.distancia_total = 0.0
+        self.lecturas_velocidad = []
+        self.nivel_zoom = 18
+        self.tipo_vista = tk.StringVar(value="hyb") # hyb=Satélite, map=Calles
+        self.rotar_mapa = tk.BooleanVar(value=False) # Modo Track-Up
+        
+        # UI: Avisos Superiores
+        self.frame_aviso = tk.Frame(root, bg="gray", height=120)
         self.frame_aviso.pack(fill=tk.X, side=tk.TOP)
         self.frame_aviso.pack_propagate(False) 
         
-        self.lbl_velocidad = tk.Label(self.frame_aviso, text="0.0 Km/h", font=("Arial", 36, "bold"), bg="gray", fg="black")
+        self.lbl_velocidad = tk.Label(self.frame_aviso, text="0.0 Km/h", font=("Arial", 32, "bold"), bg="gray", fg="black")
         self.lbl_velocidad.pack(expand=True, fill=tk.BOTH)
         
-        self.lbl_limite = tk.Label(self.frame_aviso, text="Esperando señal GPS...", font=("Arial", 12), bg="lightgray")
+        self.lbl_trip = tk.Label(self.frame_aviso, text="Recorrido: 0.0 m | V. Media: 0.0 Km/h", font=("Arial", 11, "bold"), bg="black", fg="white")
+        self.lbl_trip.pack(fill=tk.X)
+
+        self.lbl_limite = tk.Label(self.frame_aviso, text="Límite: -- Km/h | Sentido: --º", font=("Arial", 11), bg="lightgray")
         self.lbl_limite.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # Panel de Controles
-        frame_controles = tk.Frame(self.root, padx=10, pady=5)
+        # UI: Controles Base
+        frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
         tk.Label(frame_controles, text="Puerto:").pack(side=tk.LEFT)
-        self.entry_puerto = tk.Entry(frame_controles, width=10)
+        self.entry_puerto = tk.Entry(frame_controles, width=8)
         self.entry_puerto.insert(0, "COM1") 
         self.entry_puerto.pack(side=tk.LEFT, padx=5)
         
-        self.btn_conectar = tk.Button(frame_controles, text="Conectar GPS", command=self.iniciar_conexion, bg="lightblue")
+        self.btn_conectar = tk.Button(frame_controles, text="Conectar GPS", command=self.iniciar_conexion, bg="lightblue", font=("Arial", 10, "bold"))
         self.btn_conectar.pack(side=tk.LEFT, padx=5)
-        
-        # Selector de Capa (Satélite o Callejero)
-        tk.Label(frame_controles, text="Capa:").pack(side=tk.LEFT, padx=(15, 0))
-        self.var_tipo_mapa = tk.StringVar(value="Satélite (PNOA)")
-        combo_capas = ttk.Combobox(frame_controles, textvariable=self.var_tipo_mapa, values=list(TIPOS_MAPA.keys()), state="readonly", width=16)
-        combo_capas.pack(side=tk.LEFT, padx=5)
 
-        # Deslizador de Zoom interactivo
-        tk.Label(frame_controles, text="Zoom:").pack(side=tk.LEFT, padx=(15, 0))
-        self.var_zoom = tk.IntVar(value=17) 
-        self.slider_zoom = tk.Scale(frame_controles, variable=self.var_zoom, from_=10, to_=18, orient=tk.HORIZONTAL, length=120)
-        self.slider_zoom.pack(side=tk.LEFT, padx=5)
+        # UI: MEJORAS PERSONALES (Capa, Zoom, Orientación)
+        frame_mejoras = tk.Frame(root, padx=10, pady=5)
+        frame_mejoras.pack(fill=tk.X)
 
-        # El Lienzo (Canvas)
-        self.canvas = tk.Canvas(self.root, width=self.ancho_canvas, height=self.alto_canvas, bg="black")
+        # Capas
+        tk.Label(frame_mejoras, text="Capa:").pack(side=tk.LEFT)
+        ttk.Radiobutton(frame_mejoras, text="Satélite", variable=self.tipo_vista, value="hyb").pack(side=tk.LEFT)
+        ttk.Radiobutton(frame_mejoras, text="Calles", variable=self.tipo_vista, value="map").pack(side=tk.LEFT, padx=(0, 10))
+
+        # Zoom
+        tk.Button(frame_mejoras, text="➖", command=self.zoom_out, width=2).pack(side=tk.LEFT)
+        self.lbl_zoom = tk.Label(frame_mejoras, text=f"Z: {self.nivel_zoom}", width=5)
+        self.lbl_zoom.pack(side=tk.LEFT)
+        tk.Button(frame_mejoras, text="➕", command=self.zoom_in, width=2).pack(side=tk.LEFT, padx=(0, 10))
+
+        # Orientación
+        ttk.Checkbutton(frame_mejoras, text="Rotar Mapa (Track-Up)", variable=self.rotar_mapa).pack(side=tk.LEFT, padx=10)
+
+        # UI: Canvas (El mapa)
+        self.ancho_canvas, self.alto_canvas = 600, 600
+        self.canvas = tk.Canvas(root, bg="black", width=self.ancho_canvas, height=self.alto_canvas)
         self.canvas.pack()
+        
         self.imagen_tk = None
-        
-        # El coche (Punto rojo fijo en el centro)
-        self.radio_coche = 6
-        cx = self.ancho_canvas // 2
-        cy = self.alto_canvas // 2
-        self.coche = self.canvas.create_oval(
-            cx - self.radio_coche, cy - self.radio_coche, 
-            cx + self.radio_coche, cy + self.radio_coche, 
-            fill="red", outline="white", width=2
-        )
+        self.coche = self.canvas.create_polygon(0,0, 0,0, 0,0, fill="red", outline="white", width=2, tags="coche")
 
-        # Cargar imágenes de señales de velocidad
+        # Cargar señales
         self.senales_tk = {}
-        for limite in [5, 10, 15, 18, 20]:
-            try:
-                self.senales_tk[limite] = ImageTk.PhotoImage(Image.open(f"senal_{limite}.png").resize((80, 80)))
-            except Exception: pass
-            
+        for s in [5, 10, 15, 18, 20]:
+            try: self.senales_tk[s] = ImageTk.PhotoImage(Image.open(f"senal_{s}.png").resize((90, 90)))
+            except: pass
         self.senal_canvas_id = self.canvas.create_image(10, 10, anchor=tk.NW, image=None, tags="senal")
-        self.senal_actual_limite = None
         
-        # Barra de estado inferior
-        self.label_info = tk.Label(self.root, text="Desconectado.", bg="white", font=("Arial", 10), pady=5)
+        self.label_info = tk.Label(root, text="Esperando conexión...", bg="white", font=("Arial", 10), pady=5)
         self.label_info.pack(fill=tk.X, side=tk.BOTTOM)
 
+    # --- FUNCIONES DE BOTONES ZOOM ---
+    def zoom_in(self):
+        if self.nivel_zoom < 20:
+            self.nivel_zoom += 1
+            self.lbl_zoom.config(text=f"Z: {self.nivel_zoom}")
+
+    def zoom_out(self):
+        if self.nivel_zoom > 10:
+            self.nivel_zoom -= 1
+            self.lbl_zoom.config(text=f"Z: {self.nivel_zoom}")
+
+    def dibujar_coche_flecha(self, x, y, sentido_grados):
+        r_largo = 14; r_corto = 8   
+        rad = math.radians(sentido_grados)
+        x1 = x + math.sin(rad) * r_largo
+        y1 = y - math.cos(rad) * r_largo
+        x2 = x + math.sin(math.radians(sentido_grados - 140)) * r_corto
+        y2 = y - math.cos(math.radians(sentido_grados - 140)) * r_corto
+        x3 = x + math.sin(math.radians(sentido_grados + 140)) * r_corto
+        y3 = y - math.cos(math.radians(sentido_grados + 140)) * r_corto
+        self.canvas.coords(self.coche, x1, y1, x2, y2, x3, y3)
+
     def calcular_velocidad_y_sentido(self, n_actual, e_actual):
-        if not self.ultimo_utm: return 0.0, 0.0
+        if not self.ultimo_utm: return 0.0, 0.0, 0.0
         n_prev, e_prev = self.ultimo_utm
         distancia_m = math.sqrt((n_actual - n_prev)**2 + (e_actual - e_prev)**2)
         velocidad_kmh = distancia_m * 3.6
         sentido_rad = math.atan2(e_actual - e_prev, n_actual - n_prev)
         sentido_grados = (math.degrees(sentido_rad) + 360) % 360
-        return velocidad_kmh, sentido_grados
+        return velocidad_kmh, sentido_grados, distancia_m
 
-    def peticion_ign(self, lat, lon):
-        zoom_actual = self.var_zoom.get()
-        capa_seleccionada = self.var_tipo_mapa.get()
-        config_ign = TIPOS_MAPA[capa_seleccionada]
+    # --- CONVERSIÓN LAT/LON A PÍXEL EN CANVAS (Web Mercator) ---
+    def _latlon_to_world_px(self, lat, lon, zoom):
+        tile_size = 256
+        siny = math.sin(math.radians(lat))
+        siny = min(max(siny, -0.9999), 0.9999)
+        scale = tile_size * (2 ** zoom)
+        x = (lon + 180.0) / 360.0 * scale
+        y = (0.5 - math.log((1 + siny) / (1 - siny)) / (4 * math.pi)) * scale
+        return x, y
 
-        bbox = bbox_from_center_zoom_vertical(lat, lon, zoom_actual, self.ancho_canvas, self.alto_canvas)
+    def latlon_to_screen(self, lat, lon, center_lat, center_lon):
+        world_x, world_y = self._latlon_to_world_px(lat, lon, self.nivel_zoom)
+        center_x, center_y = self._latlon_to_world_px(center_lat, center_lon, self.nivel_zoom)
+        screen_x = (world_x - center_x) + self.ancho_canvas / 2
+        screen_y = (world_y - center_y) + self.alto_canvas / 2
+        return screen_x, screen_y
+
+    def rotar_punto(self, x, y, cx, cy, ang_deg):
+        # En coordenadas de pantalla (Y hacia abajo), para igualar PIL.rotate (CCW visual)
+        ang = math.radians(ang_deg)
+        dx, dy = x - cx, y - cy
+        rx = dx * math.cos(ang) - dy * math.sin(ang) + cx
+        ry = dx * math.sin(ang) + dy * math.cos(ang) + cy
+        return rx, ry
+
+    def peticion_mapquest(self, lat, lon, sentido):
+        # Si rotamos el mapa, pedimos una imagen más grande (850x850) para que al girar no salgan esquinas negras
+        ancho_req = 850 if self.rotar_mapa.get() else self.ancho_canvas
+        alto_req = 850 if self.rotar_mapa.get() else self.alto_canvas
         
-        params = {
-            "SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap",
-            "LAYERS": config_ign["layer"], "CRS": "EPSG:4326",
-            "BBOX": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
-            "WIDTH": self.ancho_canvas, "HEIGHT": self.alto_canvas, "FORMAT": "image/png"
-        }
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
+        url = (f"https://www.mapquestapi.com/staticmap/v5/map?"
+               f"key={self.API_KEY}&center={lat},{lon}&zoom={self.nivel_zoom}&"
+               f"size={ancho_req},{alto_req}&type={self.tipo_vista.get()}")
         try:
-            res = requests.get(config_ign["url"], params=params, headers=headers, timeout=5)
+            res = requests.get(url, timeout=3)
             if res.status_code == 200:
-                try:
-                    return Image.open(BytesIO(res.content)), bbox
-                except Exception:
-                    print("[ERROR] Formato de imagen no válido devuelto por el IGN.")
-        except Exception as e:
-            print(f"[ERROR RED] {e}")
-            
-        return None, bbox
+                img = Image.open(BytesIO(res.content))
+                
+                # ROTACIÓN DEL MAPA (Magia Pura)
+                if self.rotar_mapa.get():
+                    img = img.rotate(sentido, resample=Image.BICUBIC)
+                    # Recortamos el centro (600x600) para quitar las esquinas feas del giro
+                    borde_izq = (850 - 600) // 2
+                    borde_sup = (850 - 600) // 2
+                    img = img.crop((borde_izq, borde_sup, borde_izq + 600, borde_sup + 600))
+                
+                return img
+        except: pass
+        return None
 
-    # ==========================================
-    # MOTOR DE ACTUALIZACIÓN GRÁFICA (DIBUJADO)
-    # ==========================================
-    def actualizar_interfaz(self, lat, lon, easting, northing, num_sats, img_pil, bbox):
-        # 1. Pintar el mapa descargado de fondo
-        if img_pil:
-            self.imagen_tk = ImageTk.PhotoImage(img_pil)
+    def actualizar_imagen_mapa(self, img_mapa):
+        if img_mapa:
+            self.imagen_tk = ImageTk.PhotoImage(img_mapa)
             self.canvas.delete("fondo")
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.imagen_tk, tags="fondo")
             self.canvas.tag_lower("fondo")
 
-        # 2. NUEVO: LÓGICA DE LA LÍNEA AZUL (ESTELA BRUNO)
-        # Guardamos la posición geográfica real actual
-        self.historial_gps.append((lat, lon))
-        
-        # Borramos la línea vieja para recalcularla según el nuevo encuadre del mapa
-        self.canvas.delete("ruta")
-        
-        if len(self.historial_gps) > 1 and bbox:
-            puntos_pantalla = []
-            min_lat, min_lon, max_lat, max_lon = bbox
-            
-            # Convertimos cada coordenada geográfica histórica a píxeles del Canvas actual
-            for plat, plon in self.historial_gps:
-                x = ((plon - min_lon) / (max_lon - min_lon)) * self.ancho_canvas
-                y = ((max_lat - plat) / (max_lat - min_lat)) * self.alto_canvas
-                puntos_pantalla.extend([x, y])
-                
-            # Si tenemos suficientes puntos, dibujamos la estela azul continua
-            if len(puntos_pantalla) >= 4:
-                self.canvas.create_line(puntos_pantalla, fill="blue", width=3, tags="ruta")
+    def descargar_mapa_async(self, lat, lon, sentido):
+        if self.descargando_mapa: return
+        self.descargando_mapa = True
+        def tarea_fondo():
+            img = self.peticion_mapquest(lat, lon, sentido)
+            if img: self.root.after(0, self.actualizar_imagen_mapa, img)
+            self.descargando_mapa = False
+        threading.Thread(target=tarea_fondo, daemon=True).start()
 
-        # 3. Traer al frente el coche y la señal para que el mapa no los tape
-        self.canvas.tag_raise(self.coche)
+    def actualizar_interfaz(self, lat, lon, altitud, easting, northing, num_sats):
+        vel, sentido, dist_m = self.calcular_velocidad_y_sentido(northing, easting)
+        self.ultimo_utm = (northing, easting)
+
+        # Ordenador de a bordo
+        self.distancia_total += dist_m
+        if vel > 0.5:
+            self.lecturas_velocidad.append(vel)
+        v_media = sum(self.lecturas_velocidad) / len(self.lecturas_velocidad) if self.lecturas_velocidad else 0.0
+        self.lbl_trip.config(text=f"Recorrido: {self.distancia_total:.1f} m  |  V. Media: {v_media:.1f} Km/h")
+
+        # --- ESTELA AZUL (BRUNO) ---
+        self.historial_gps.append((lat, lon))
+        self.canvas.delete("ruta")
+
+        if len(self.historial_gps) > 1:
+            puntos = []
+            cx, cy = self.ancho_canvas // 2, self.alto_canvas // 2
+
+            for plat, plon in self.historial_gps:
+                x, y = self.latlon_to_screen(plat, plon, lat, lon)
+
+                # Si el mapa rota, rotamos también la estela para que coincida
+                if self.rotar_mapa.get():
+                    # Usamos ángulo negativo para igualar la rotación visual CCW de PIL
+                    x, y = self.rotar_punto(x, y, cx, cy, -sentido)
+
+                puntos.extend([x, y])
+
+            if len(puntos) >= 4:
+                self.canvas.create_line(puntos, fill="blue", width=3, tags="ruta")
+
+        # Dibujar Coche
+        cx, cy = self.ancho_canvas // 2, self.alto_canvas // 2
+        
+        # Si el mapa rota, el coche siempre apunta al Norte (Arriba de la pantalla = 0º)
+        if self.rotar_mapa.get():
+            self.dibujar_coche_flecha(cx, cy, 0)
+        else:
+            self.dibujar_coche_flecha(cx, cy, sentido)
+            
+        self.canvas.tag_raise("coche")
         self.canvas.tag_raise("senal")
 
-        # 4. Cálculo de Velocidades, Límites y Alertas (Práctica 3)
-        vel, sentido = self.calcular_velocidad_y_sentido(northing, easting)
-        self.ultimo_utm = (northing, easting)
-        
+        # Límites INSIA
         limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting, sentido)
         if limite > 0:
             color = self.mapa_electronico.evaluar_aviso(vel, limite)
-            txt_limite = f"Pista INSIA - Límite: {limite} Km/h | Sentido: {sentido:.1f}º"
-            limite_int = int(round(limite))
-            if limite_int in self.senales_tk and limite_int != self.senal_actual_limite:
-                self.canvas.itemconfig(self.senal_canvas_id, image=self.senales_tk[limite_int])
-                self.senal_actual_limite = limite_int
+            txt_limite = f"INSIA - Límite: {limite} Km/h | Sentido: {sentido:.1f}º"
+            if int(limite) in self.senales_tk:
+                self.canvas.itemconfig(self.senal_canvas_id, image=self.senales_tk[int(limite)])
         else:
             color = "gray"
-            txt_limite = f"Fuera de pista controlada | Sentido: {sentido:.1f}º"
+            txt_limite = f"Fuera de pista de pruebas | Sentido: {sentido:.1f}º"
             self.canvas.itemconfig(self.senal_canvas_id, image=None)
-            self.senal_actual_limite = None
 
-        # Actualizar textos del panel de avisos
         self.frame_aviso.config(bg=color)
         self.lbl_velocidad.config(text=f"{vel:.1f} Km/h", bg=color)
         self.lbl_limite.config(text=txt_limite, bg="lightgray")
-
-        # Actualizar textos de la barra inferior
         self.label_info.config(text=f"Lat: {lat:.5f} | Lon: {lon:.5f} | Satélites: {num_sats}")
 
-    # ==========================================
-    # GESTIÓN DE HILOS Y CONEXIÓN GPS
-    # ==========================================
     def iniciar_conexion(self):
         if self.leyendo: return 
         puerto = self.entry_puerto.get().strip()
-        if not puerto:
-            messagebox.showwarning("Aviso", "Por favor, introduce un puerto serie.")
-            return
-            
+        if not puerto: return
         self.leyendo = True
         self.btn_conectar.config(text="Conectado", state=tk.DISABLED)
-        self.hilo_gps = threading.Thread(target=self.leer_gps_continuamente, args=(puerto,), daemon=True)
-        self.hilo_gps.start()
+        threading.Thread(target=self.leer_gps_continuamente, args=(puerto,), daemon=True).start()
 
     def leer_gps_continuamente(self, puerto):
         try:
             ser = serial.Serial(port=puerto, baudrate=4800, timeout=1)
-            self.root.after(0, lambda: self.label_info.config(text="GPS Conectado. Recibiendo satélites..."))
-            
+            self.root.after(0, lambda: self.label_info.config(text="GPS Conectado. Procesando..."))
             while self.leyendo:
-                linea = ser.readline().decode("ascii", errors="replace").strip()
-                if "$GPGGA" in linea or "$GNGGA" in linea:
-                    datos = parsear_gga(linea)
-                    
-                    if datos and datos.get("calidad_fix", 0) > 0:
-                        lat = datos["latitud_decimal"]
-                        lon = datos["longitud_decimal"]
-                        utm = geograficas_a_utm(lat, lon)
-                        
-                        # Descargamos el trozo de mapa del IGN correspondiente a la posición actual
-                        img_pil, bbox = self.peticion_ign(lat, lon)
-                        
-                        # Enviamos la orden de repintar todo a la ventana principal (Thread Safe)
-                        self.root.after(0, self.actualizar_interfaz, lat, lon, utm['easting'], utm['northing'], datos['num_satelites'], img_pil, bbox)
-                        
+                try: 
+                    linea = ser.readline().decode("ascii", errors="replace").strip()
+                    if "$GPGGA" in linea or "$GNGGA" in linea:
+                        datos = parsear_gga(linea)
+                        if datos and datos.get("calidad_fix", 0) > 0:
+                            lat, lon = datos["latitud_decimal"], datos["longitud_decimal"]
+                            alt = datos.get("altitud", 0.0)
+                            utm = geograficas_a_utm(lat, lon)
+                            
+                            vel, sentido, dist = self.calcular_velocidad_y_sentido(utm['northing'], utm['easting'])
+                            
+                            self.root.after(0, self.actualizar_interfaz, lat, lon, alt, utm['easting'], utm['northing'], datos['num_satelites'])
+                            
+                            if self.API_KEY and "Pon_Tu_Clave" not in self.API_KEY:
+                                self.descargar_mapa_async(lat, lon, sentido)
+                except Exception:
+                    continue
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Fallo en puerto:\n{e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Problema puerto:\n{e}"))
             self.root.after(0, self.desconectar)
 
     def desconectar(self):
