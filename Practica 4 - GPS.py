@@ -77,7 +77,7 @@ class NavegadorGPS:
         self.root.title("Navegador GPS Avanzado - MapQuest (Satélite)")
         
         # --- AQUÍ PONES TU CLAVE DE MAPQUEST ---
-        self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA"
+        self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA" # Clave que caduca
         
         self.leyendo = False
         self.historial_puntos_pixeles = [] 
