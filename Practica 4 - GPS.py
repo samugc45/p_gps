@@ -11,9 +11,7 @@ from io import BytesIO
 from parseo_tramas import parsear_gga
 from conversion_utm import geograficas_a_utm
 
-# ==========================================
-# CLASE MAPA INSIA (Gestión de límites)
-# ==========================================
+
 class MapaINSIA:
     def __init__(self, ruta_archivo):
         self.puntos = []
@@ -63,15 +61,12 @@ class MapaINSIA:
         elif velocidad_actual > (velocidad_maxima + margen): return "red"
         else: return "yellow"
 
-# ==========================================
-# GUI: NAVEGADOR GPS AVANZADO
-# ==========================================
+
 class NavegadorGPS:
     def __init__(self, root):
         self.root = root
         self.root.title("Navegador GPS - Edición Profesional")
         
-        # --- ¡PON TU CLAVE DE MAPQUEST AQUÍ! ---
         self.API_KEY = "sLxMqoKMmWHIEVqLfAL84uoma0iijdBA"
         
         self.leyendo = False
@@ -79,17 +74,14 @@ class NavegadorGPS:
         self.mapa_electronico = MapaINSIA("mapa_insia.txt") 
         self.descargando_mapa = False
         
-        # NUEVO: historial GPS para estela
         self.historial_gps = []
 
-        # Variables de Mejora Personal
         self.distancia_total = 0.0
         self.lecturas_velocidad = []
         self.nivel_zoom = 18
-        self.tipo_vista = tk.StringVar(value="hyb") # hyb=Satélite, map=Calles
-        self.rotar_mapa = tk.BooleanVar(value=False) # Modo Track-Up
+        self.tipo_vista = tk.StringVar(value="hyb") 
+        self.rotar_mapa = tk.BooleanVar(value=False)
         
-        # UI: Avisos Superiores
         self.frame_aviso = tk.Frame(root, bg="gray", height=120)
         self.frame_aviso.pack(fill=tk.X, side=tk.TOP)
         self.frame_aviso.pack_propagate(False) 
@@ -103,7 +95,6 @@ class NavegadorGPS:
         self.lbl_limite = tk.Label(self.frame_aviso, text="Límite: -- Km/h | Sentido: --º", font=("Arial", 11), bg="lightgray")
         self.lbl_limite.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # UI: Controles Base
         frame_controles = tk.Frame(root, padx=10, pady=5)
         frame_controles.pack(fill=tk.X)
         
@@ -115,25 +106,22 @@ class NavegadorGPS:
         self.btn_conectar = tk.Button(frame_controles, text="Conectar GPS", command=self.iniciar_conexion, bg="lightblue", font=("Arial", 10, "bold"))
         self.btn_conectar.pack(side=tk.LEFT, padx=5)
 
-        # UI: MEJORAS PERSONALES (Capa, Zoom, Orientación)
         frame_mejoras = tk.Frame(root, padx=10, pady=5)
         frame_mejoras.pack(fill=tk.X)
 
-        # Capas
         tk.Label(frame_mejoras, text="Capa:").pack(side=tk.LEFT)
         ttk.Radiobutton(frame_mejoras, text="Satélite", variable=self.tipo_vista, value="hyb").pack(side=tk.LEFT)
         ttk.Radiobutton(frame_mejoras, text="Calles", variable=self.tipo_vista, value="map").pack(side=tk.LEFT, padx=(0, 10))
 
-        # Zoom
+        
         tk.Button(frame_mejoras, text="➖", command=self.zoom_out, width=2).pack(side=tk.LEFT)
         self.lbl_zoom = tk.Label(frame_mejoras, text=f"Z: {self.nivel_zoom}", width=5)
         self.lbl_zoom.pack(side=tk.LEFT)
         tk.Button(frame_mejoras, text="➕", command=self.zoom_in, width=2).pack(side=tk.LEFT, padx=(0, 10))
 
-        # Orientación
+        
         ttk.Checkbutton(frame_mejoras, text="Rotar Mapa (Track-Up)", variable=self.rotar_mapa).pack(side=tk.LEFT, padx=10)
 
-        # UI: Canvas (El mapa)
         self.ancho_canvas, self.alto_canvas = 600, 600
         self.canvas = tk.Canvas(root, bg="black", width=self.ancho_canvas, height=self.alto_canvas)
         self.canvas.pack()
@@ -141,7 +129,6 @@ class NavegadorGPS:
         self.imagen_tk = None
         self.coche = self.canvas.create_polygon(0,0, 0,0, 0,0, fill="red", outline="white", width=2, tags="coche")
 
-        # Cargar señales
         self.senales_tk = {}
         for s in [5, 10, 15, 18, 20]:
             try: self.senales_tk[s] = ImageTk.PhotoImage(Image.open(f"senal_{s}.png").resize((90, 90)))
@@ -151,7 +138,6 @@ class NavegadorGPS:
         self.label_info = tk.Label(root, text="Esperando conexión...", bg="white", font=("Arial", 10), pady=5)
         self.label_info.pack(fill=tk.X, side=tk.BOTTOM)
 
-    # --- FUNCIONES DE BOTONES ZOOM ---
     def zoom_in(self):
         if self.nivel_zoom < 20:
             self.nivel_zoom += 1
@@ -182,7 +168,6 @@ class NavegadorGPS:
         sentido_grados = (math.degrees(sentido_rad) + 360) % 360
         return velocidad_kmh, sentido_grados, distancia_m
 
-    # --- CONVERSIÓN LAT/LON A PÍXEL EN CANVAS (Web Mercator) ---
     def _latlon_to_world_px(self, lat, lon, zoom):
         tile_size = 256
         siny = math.sin(math.radians(lat))
@@ -200,7 +185,6 @@ class NavegadorGPS:
         return screen_x, screen_y
 
     def rotar_punto(self, x, y, cx, cy, ang_deg):
-        # En coordenadas de pantalla (Y hacia abajo), para igualar PIL.rotate (CCW visual)
         ang = math.radians(ang_deg)
         dx, dy = x - cx, y - cy
         rx = dx * math.cos(ang) - dy * math.sin(ang) + cx
@@ -208,7 +192,6 @@ class NavegadorGPS:
         return rx, ry
 
     def peticion_mapquest(self, lat, lon, sentido):
-        # Si rotamos el mapa, pedimos una imagen más grande (850x850) para que al girar no salgan esquinas negras
         ancho_req = 850 if self.rotar_mapa.get() else self.ancho_canvas
         alto_req = 850 if self.rotar_mapa.get() else self.alto_canvas
         
@@ -220,10 +203,8 @@ class NavegadorGPS:
             if res.status_code == 200:
                 img = Image.open(BytesIO(res.content))
                 
-                # ROTACIÓN DEL MAPA (Magia Pura)
                 if self.rotar_mapa.get():
                     img = img.rotate(sentido, resample=Image.BICUBIC)
-                    # Recortamos el centro (600x600) para quitar las esquinas feas del giro
                     borde_izq = (850 - 600) // 2
                     borde_sup = (850 - 600) // 2
                     img = img.crop((borde_izq, borde_sup, borde_izq + 600, borde_sup + 600))
@@ -252,14 +233,12 @@ class NavegadorGPS:
         vel, sentido, dist_m = self.calcular_velocidad_y_sentido(northing, easting)
         self.ultimo_utm = (northing, easting)
 
-        # Ordenador de a bordo
         self.distancia_total += dist_m
         if vel > 0.5:
             self.lecturas_velocidad.append(vel)
         v_media = sum(self.lecturas_velocidad) / len(self.lecturas_velocidad) if self.lecturas_velocidad else 0.0
         self.lbl_trip.config(text=f"Recorrido: {self.distancia_total:.1f} m  |  V. Media: {v_media:.1f} Km/h")
 
-        # --- ESTELA AZUL (BRUNO) ---
         self.historial_gps.append((lat, lon))
         self.canvas.delete("ruta")
 
@@ -270,9 +249,7 @@ class NavegadorGPS:
             for plat, plon in self.historial_gps:
                 x, y = self.latlon_to_screen(plat, plon, lat, lon)
 
-                # Si el mapa rota, rotamos también la estela para que coincida
                 if self.rotar_mapa.get():
-                    # Usamos ángulo negativo para igualar la rotación visual CCW de PIL
                     x, y = self.rotar_punto(x, y, cx, cy, -sentido)
 
                 puntos.extend([x, y])
@@ -280,10 +257,8 @@ class NavegadorGPS:
             if len(puntos) >= 4:
                 self.canvas.create_line(puntos, fill="blue", width=3, tags="ruta")
 
-        # Dibujar Coche
         cx, cy = self.ancho_canvas // 2, self.alto_canvas // 2
         
-        # Si el mapa rota, el coche siempre apunta al Norte (Arriba de la pantalla = 0º)
         if self.rotar_mapa.get():
             self.dibujar_coche_flecha(cx, cy, 0)
         else:
@@ -292,7 +267,6 @@ class NavegadorGPS:
         self.canvas.tag_raise("coche")
         self.canvas.tag_raise("senal")
 
-        # Límites INSIA
         limite = self.mapa_electronico.obtener_limite_velocidad(northing, easting, sentido)
         if limite > 0:
             color = self.mapa_electronico.evaluar_aviso(vel, limite)
